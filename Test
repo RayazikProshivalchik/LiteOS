@@ -1,0 +1,70 @@
+name: AOSP Cloud Build for Redmi Note 10 Pro
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Setup Build Environment
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y bc bison build-essential ccache curl flex g++-multilib gcc-multilib git git-lfs gnupg gperf imagemagick lib32readline-dev lib32z1-dev libelf-dev liblz4-tool libsdl1.1-dev libssl-dev libxml2 libxml2-utils lzop pngcrush rsync schedtool squashfs-tools xsltproc zip zlib1g-dev python3
+        mkdir -p ~/bin
+        curl https://googleapis.com > ~/bin/repo
+        chmod a+x ~/bin/repo
+        export PATH=~/bin:$PATH
+
+    - name: Initialize Repo and Sync
+      run: |
+        export PATH=~/bin:$PATH
+        git config --global user.name "MyOS Developer"
+        git config --global user.email "developer@myos.com"
+        
+        mkdir ~/android && cd ~/android
+        repo init -u https://github.com -b lineage-21.0 --git-lfs --depth=1
+        
+        mkdir -p .repo/local_manifests
+        cat <<EOF > .repo/local_manifests/sweet.xml
+        <?xml version="1.0" encoding="UTF-8"?>
+        <manifest>
+          <remove-project name="LineageOS/android_packages_apps_Trebuchet" />
+          <remove-project name="LineageOS/android_packages_apps_Settings" />
+          
+          <project name="AxionOS/android_packages_apps_Launcher3" path="packages/apps/Launcher3" remote="github" revision="14" />
+          <project name="AxionOS/android_packages_apps_Settings" path="packages/apps/Settings" remote="github" revision="14" />
+          <project name="LineageOS/android_vendor_pixelstyle" path="vendor/pixelstyle" remote="github" revision="14" />
+          
+          <project name="LineageOS/android_device_xiaomi_sweet" path="device/xiaomi/sweet" remote="github" revision="lineage-21.0" />
+          <project name="LineageOS/android_device_xiaomi_sm6150-common" path="device/xiaomi/sm6150-common" remote="github" revision="lineage-21.0" />
+          <project name="LineageOS/android_kernel_xiaomi_sm6150" path="kernel/xiaomi/sm6150" remote="github" revision="lineage-21.0" />
+          <project name="TheMuppets/proprietary_vendor_xiaomi_sweet" path="vendor/xiaomi/sweet" remote="github" revision="lineage-21.0" />
+          <project name="TheMuppets/proprietary_vendor_xiaomi_sm6150-common" path="vendor/xiaomi/sm6150-common" remote="github" revision="lineage-21.0" />
+        </manifest>
+        EOF
+
+        repo sync -c -j$(nproc --all) --force-sync --no-clone-bundle --no-tags
+
+    - name: Run Compilation
+      run: |
+        export PATH=~/bin:$PATH
+        cd ~/android
+        
+        source build/envsetup.sh
+        
+        mv device/xiaomi/sweet/lineage_sweet.mk device/xiaomi/sweet/axion_sweet.mk
+        sed -i 's/lineage_sweet/axion_sweet/g' device/xiaomi/sweet/axion_sweet.mk
+        sed -i 's/vendor\/lineage/vendor\/axion/g' device/xiaomi/sweet/axion_sweet.mk
+        
+        lunch axion_sweet-userdebug
+        mka brunch sweet
+
+    - name: Upload Flashable ZIP to Release
+      uses: actions/upload-artifact@v4
+      with:
+        name: My_Custom_AOSP_Sweet
+        path: ~/android/out/target/product/sweet/*.zip
